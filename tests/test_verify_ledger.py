@@ -107,6 +107,46 @@ class LedgerVerificationTests(unittest.TestCase):
             with self.assertRaisesRegex(verify_ledger.VerificationError, "record list is not an exact append-only prefix"):
                 verify_ledger.verify_transition(previous, current)
 
+    def test_valid_append_passes_current_and_transition_verification(self):
+        with tempfile.TemporaryDirectory() as previous_temp, tempfile.TemporaryDirectory() as current_temp:
+            previous = Path(previous_temp)
+            current = Path(current_temp)
+            self.copy_ledger(previous)
+            self.copy_ledger(current)
+
+            status = current / "STATUS.md"
+            status.write_text(status.read_text() + "\n## Witness entry 2\n\nAppend-only. Status remains UNDETERMINED.\n")
+            self.update_manifest_hash(current, "STATUS.md")
+
+            first_path = current / RECORD
+            first_hash = hashlib.sha256(first_path.read_bytes()).hexdigest()
+            second = json.loads(first_path.read_text())
+            second["sequence"] = 2
+            second["previous_record_sha256"] = first_hash
+            second["record_type"] = "status_append_witness"
+            second["scope"] = "Witnesses an exact append-only extension of the status record."
+            for entry in second["documents"]:
+                document = current / entry["path"]
+                entry["sha256"] = hashlib.sha256(document.read_bytes()).hexdigest()
+            second_relative = "records/0002-status-append-witness.json"
+            second_path = current / second_relative
+            second_path.write_text(json.dumps(second))
+
+            manifest_path = current / "LEDGER.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["records"].append({
+                "path": second_relative,
+                "size": second_path.stat().st_size,
+                "sha256": hashlib.sha256(second_path.read_bytes()).hexdigest(),
+            })
+            manifest["records"] = sorted(manifest["records"], key=lambda item: item["path"])
+            manifest_path.write_text(json.dumps(manifest))
+
+            self.assertEqual(verify_ledger.verify(current)["records"], 2)
+            result = verify_ledger.verify_transition(previous, current)
+            self.assertTrue(result["append_only_transition"])
+            self.assertEqual(result["current_records"], 2)
+
     def test_first_record_cannot_claim_a_previous_record(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

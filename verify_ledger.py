@@ -295,8 +295,10 @@ def verify(root: Path) -> dict:
             if not isinstance(sha, str) or not HEX64.fullmatch(sha):
                 raise VerificationError("invalid witness document digest")
             bound[path_name] = sha
-        if bound != document_hashes:
-            raise VerificationError("witness record document bindings mismatch")
+        if not bound:
+            raise VerificationError("witness record must bind at least one document")
+        if expected_sequence == len(record_entries) and bound != document_hashes:
+            raise VerificationError("latest witness record document bindings mismatch")
         previous = actual
         record_hashes.append(actual)
 
