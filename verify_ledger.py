@@ -104,30 +104,34 @@ def read_held(path: Path, limit: int) -> bytes:
         os.close(descriptor)
 
 
-def load_json(path: Path) -> dict:
+def load_json_bytes(data: bytes, name: str) -> dict:
     def reject_duplicates(pairs):
         result = {}
         for key, value in pairs:
             if key in result:
-                raise VerificationError(f"duplicate JSON key in {path.name}: {key}")
+                raise VerificationError(f"duplicate JSON key in {name}: {key}")
             result[key] = value
         return result
 
     def reject_constant(value):
-        raise VerificationError(f"non-finite JSON value in {path.name}: {value}")
+        raise VerificationError(f"non-finite JSON value in {name}: {value}")
 
     try:
-        text = read_held(path, MAX_JSON_BYTES).decode("utf-8")
+        text = data.decode("utf-8")
         value = json.loads(
             text,
             object_pairs_hook=reject_duplicates,
             parse_constant=reject_constant,
         )
     except (UnicodeError, json.JSONDecodeError) as exc:
-        raise VerificationError(f"cannot parse {path.name}") from exc
+        raise VerificationError(f"cannot parse {name}") from exc
     if not isinstance(value, dict):
-        raise VerificationError(f"{path.name} must contain a JSON object")
+        raise VerificationError(f"{name} must contain a JSON object")
     return value
+
+
+def load_json(path: Path) -> dict:
+    return load_json_bytes(read_held(path, MAX_JSON_BYTES), path.name)
 
 
 def require_regular(root: Path, relative: str) -> Path:
@@ -150,7 +154,103 @@ def require_regular(root: Path, relative: str) -> Path:
     return path
 
 
-def verify_member(root: Path, entry: dict) -> tuple[Path, str]:
+def validate_council_status(value: dict) -> None:
+    required = {
+        "schema", "experiment_id", "recorded_utc", "decision",
+        "council_inferential_status", "append_only", "frozen_protocol_interpretation",
+        "controlling_statement", "council_status_statement", "deviations",
+        "frozen_artifacts_sha256", "currently_observed_unsealed_dependency",
+        "prohibited_actions", "council_workstreams",
+    }
+    if set(value) != required:
+        raise VerificationError("canonical status document keys are invalid")
+    if value["schema"] != "uap_crossing_angle_holdout_council_status/v1":
+        raise VerificationError("canonical status document schema mismatch")
+    if value["decision"] != "NOT_COUNCIL_CONFORMANT":
+        raise VerificationError("canonical status decision mismatch")
+    if value["council_inferential_status"] != "UNDETERMINED":
+        raise VerificationError("canonical status must remain UNDETERMINED")
+    if value["append_only"] is not True:
+        raise VerificationError("canonical status must remain append-only")
+    for key in ("experiment_id", "recorded_utc", "controlling_statement", "council_status_statement"):
+        if not isinstance(value[key], str) or not value[key]:
+            raise VerificationError(f"canonical status string is invalid: {key}")
+
+    protocol = value["frozen_protocol_interpretation"]
+    protocol_keys = {
+        "authentic_execution_of_protocol_v1", "criteria_1_to_3_passed", "criterion_5_passed",
+        "physical_error_law_supported_under_protocol_v1", "production_output_supported",
+    }
+    if not isinstance(protocol, dict) or set(protocol) != protocol_keys:
+        raise VerificationError("canonical frozen interpretation keys are invalid")
+    expected_protocol = {
+        "authentic_execution_of_protocol_v1": True,
+        "criteria_1_to_3_passed": True,
+        "criterion_5_passed": False,
+        "physical_error_law_supported_under_protocol_v1": True,
+        "production_output_supported": False,
+    }
+    if protocol != expected_protocol:
+        raise VerificationError("canonical frozen interpretation is contradictory")
+
+    deviations = value["deviations"]
+    if not isinstance(deviations, list) or not deviations:
+        raise VerificationError("canonical status deviations are invalid")
+    deviation_ids = set()
+    base_keys = {"id", "frozen_v1_choice", "later_council_requirement"}
+    for deviation in deviations:
+        if not isinstance(deviation, dict) or set(deviation) not in {frozenset(base_keys), frozenset(base_keys | {"limit"})}:
+            raise VerificationError("canonical status deviation keys are invalid")
+        if any(not isinstance(deviation[key], str) or not deviation[key] for key in deviation):
+            raise VerificationError("canonical status deviation value is invalid")
+        if deviation["id"] in deviation_ids:
+            raise VerificationError("canonical status deviation IDs are not unique")
+        deviation_ids.add(deviation["id"])
+
+    frozen_hashes = value["frozen_artifacts_sha256"]
+    expected_frozen_paths = {
+        "evidence/preregistration.json",
+        "evidence/results/holdout-2026080502.json",
+        "evidence/results/holdout-2026080502.rows.json",
+        "evidence/results/holdout-2026080502.rows.csv",
+        "evidence/results/holdout-2026080502.manifest.json",
+    }
+    if not isinstance(frozen_hashes, dict) or set(frozen_hashes) != expected_frozen_paths:
+        raise VerificationError("canonical frozen artifact set is invalid")
+    if any(not isinstance(item, str) or not HEX64.fullmatch(item) for item in frozen_hashes.values()):
+        raise VerificationError("canonical frozen artifact digest is invalid")
+
+    dependency = value["currently_observed_unsealed_dependency"]
+    if not isinstance(dependency, dict) or set(dependency) != {"path", "sha256", "observed_utc", "disclaimer"}:
+        raise VerificationError("canonical observed dependency keys are invalid")
+    if dependency["path"] != "uap_conditioning.py" or not isinstance(dependency["sha256"], str) or not HEX64.fullmatch(dependency["sha256"]):
+        raise VerificationError("canonical observed dependency binding is invalid")
+    if not isinstance(dependency["observed_utc"], str) or not isinstance(dependency["disclaimer"], str):
+        raise VerificationError("canonical observed dependency metadata is invalid")
+
+    prohibited = value["prohibited_actions"]
+    if not isinstance(prohibited, list) or not prohibited:
+        raise VerificationError("canonical prohibited actions are invalid")
+    if any(not isinstance(item, str) or not item for item in prohibited):
+        raise VerificationError("canonical prohibited action is invalid")
+    if len(prohibited) != len(set(prohibited)):
+        raise VerificationError("canonical prohibited actions are not unique")
+
+    workstreams = value["council_workstreams"]
+    if not isinstance(workstreams, list) or not workstreams:
+        raise VerificationError("canonical council workstreams are invalid")
+    seats = set()
+    for workstream in workstreams:
+        if not isinstance(workstream, dict) or set(workstream) != {"seat", "vote"}:
+            raise VerificationError("canonical council workstream keys are invalid")
+        if not isinstance(workstream["seat"], str) or not isinstance(workstream["vote"], str):
+            raise VerificationError("canonical council workstream value is invalid")
+        if workstream["seat"] in seats:
+            raise VerificationError("canonical council seats are not unique")
+        seats.add(workstream["seat"])
+
+
+def verify_member(root: Path, entry: dict) -> tuple[Path, str, bytes]:
     if not isinstance(entry, dict) or set(entry) != {"path", "size", "sha256"}:
         raise VerificationError("invalid ledger member record")
     relative = entry["path"]
@@ -163,12 +263,13 @@ def verify_member(root: Path, entry: dict) -> tuple[Path, str]:
     if not isinstance(expected, str) or not HEX64.fullmatch(expected):
         raise VerificationError(f"invalid ledger member SHA-256: {relative}")
     path = require_regular(root, relative)
-    actual, actual_size = digest(path)
-    if actual_size != size:
+    data = read_held(path, max(MAX_JSON_BYTES, MAX_STATUS_BYTES))
+    actual = hashlib.sha256(data).hexdigest()
+    if len(data) != size:
         raise VerificationError(f"size mismatch: {relative}")
     if actual != expected:
         raise VerificationError(f"SHA-256 mismatch: {relative}")
-    return path, actual
+    return path, actual, data
 
 
 def _validate_entries(entries, label: str) -> dict:
@@ -223,13 +324,16 @@ def verify(root: Path) -> dict:
     _validate_entries(record_entries, "records")
 
     document_hashes = {}
+    document_bytes = {}
     for entry in document_entries:
-        _, actual = verify_member(root, entry)
+        _, actual, data = verify_member(root, entry)
         document_hashes[entry["path"]] = actual
+        document_bytes[entry["path"]] = data
 
-    status_path = require_regular(root, "STATUS.md")
     try:
-        status_text = read_held(status_path, MAX_STATUS_BYTES).decode("utf-8")
+        status_text = document_bytes["STATUS.md"].decode("utf-8")
+    except KeyError as exc:
+        raise VerificationError("STATUS.md is not manifest-bound") from exc
     except UnicodeError as exc:
         raise VerificationError("STATUS.md is not valid UTF-8") from exc
     if "Append-only." not in status_text or "UNDETERMINED" not in status_text:
@@ -238,19 +342,14 @@ def verify(root: Path) -> dict:
     council_path = "records/holdout-2026080502.council-status.json"
     if council_path not in document_map:
         raise VerificationError("canonical status document is not manifest-bound")
-    council = load_json(require_regular(root, council_path))
-    if council.get("schema") != "uap_crossing_angle_holdout_council_status/v1":
-        raise VerificationError("canonical status document schema mismatch")
-    if council.get("council_inferential_status") != "UNDETERMINED":
-        raise VerificationError("canonical status document changed inferential status")
-    if council.get("append_only") is not True:
-        raise VerificationError("canonical status document is not append-only")
+    council = load_json_bytes(document_bytes[council_path], Path(council_path).name)
+    validate_council_status(council)
 
     previous = None
     record_hashes = []
     for expected_sequence, entry in enumerate(record_entries, start=1):
-        path, actual = verify_member(root, entry)
-        record = load_json(path)
+        path, actual, data = verify_member(root, entry)
+        record = load_json_bytes(data, path.name)
         required_record_keys = {
             "schema", "sequence", "previous_record_sha256", "record_type",
             "canonical_project", "canonical_tag", "canonical_source_commit",

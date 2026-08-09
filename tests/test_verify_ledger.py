@@ -78,6 +78,62 @@ class LedgerVerificationTests(unittest.TestCase):
             with self.assertRaisesRegex(verify_ledger.VerificationError, "bindings mismatch"):
                 verify_ledger.verify(root)
 
+    def test_rebound_unknown_council_status_key_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            relative = "records/holdout-2026080502.council-status.json"
+            path = root / relative
+            value = json.loads(path.read_text())
+            value["unknown_probe"] = True
+            path.write_text(json.dumps(value))
+            self.update_manifest_hash(root, relative)
+            self.update_record_document_hash(root, relative)
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "status document keys"):
+                verify_ledger.verify(root)
+
+    def test_rebound_council_pass_claim_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            relative = "records/holdout-2026080502.council-status.json"
+            path = root / relative
+            value = json.loads(path.read_text())
+            value["decision"] = "COUNCIL_PASS"
+            path.write_text(json.dumps(value))
+            self.update_manifest_hash(root, relative)
+            self.update_record_document_hash(root, relative)
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "decision mismatch"):
+                verify_ledger.verify(root)
+
+    def test_rebound_production_output_claim_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            relative = "records/holdout-2026080502.council-status.json"
+            path = root / relative
+            value = json.loads(path.read_text())
+            value["frozen_protocol_interpretation"]["production_output_supported"] = True
+            path.write_text(json.dumps(value))
+            self.update_manifest_hash(root, relative)
+            self.update_record_document_hash(root, relative)
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "interpretation is contradictory"):
+                verify_ledger.verify(root)
+
+    def test_rebound_nonstring_prohibited_action_fails_cleanly(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            relative = "records/holdout-2026080502.council-status.json"
+            path = root / relative
+            value = json.loads(path.read_text())
+            value["prohibited_actions"][0] = {"invalid": True}
+            path.write_text(json.dumps(value))
+            self.update_manifest_hash(root, relative)
+            self.update_record_document_hash(root, relative)
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "prohibited action is invalid"):
+                verify_ledger.verify(root)
+
     def test_rewritten_status_fails_transition_even_when_rebound(self):
         with tempfile.TemporaryDirectory() as previous_temp, tempfile.TemporaryDirectory() as current_temp:
             previous = Path(previous_temp)
@@ -211,6 +267,43 @@ class LedgerVerificationTests(unittest.TestCase):
             status.symlink_to(target.name)
             with self.assertRaisesRegex(verify_ledger.VerificationError, "regular file"):
                 verify_ledger.verify(root)
+
+    def test_post_hash_record_replacement_does_not_change_parsed_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            record_path = root / RECORD
+            original_scope = json.loads(record_path.read_text())["scope"]
+            real_verify_member = verify_ledger.verify_member
+            real_load_json_bytes = verify_ledger.load_json_bytes
+            parsed_scopes = []
+            swapped = False
+
+            def swapping_member(base, entry):
+                nonlocal swapped
+                result = real_verify_member(base, entry)
+                if entry["path"] == RECORD and not swapped:
+                    swapped = True
+                    attacker = json.loads(record_path.read_text())
+                    attacker["scope"] = "ATTACKER VERSION AFTER HASH"
+                    record_path.write_text(json.dumps(attacker))
+                return result
+
+            def capturing_load(data, name):
+                value = real_load_json_bytes(data, name)
+                if name == Path(RECORD).name:
+                    parsed_scopes.append(value["scope"])
+                return value
+
+            with mock.patch.object(verify_ledger, "verify_member", side_effect=swapping_member):
+                with mock.patch.object(verify_ledger, "load_json_bytes", side_effect=capturing_load):
+                    self.assertTrue(verify_ledger.verify(root)["ok"])
+            self.assertTrue(swapped)
+            self.assertEqual(parsed_scopes, [original_scope])
+            self.assertNotEqual(
+                hashlib.sha256(record_path.read_bytes()).hexdigest(),
+                json.loads((root / "LEDGER.json").read_text())["records"][0]["sha256"],
+            )
 
     def test_mutation_during_hashing_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
