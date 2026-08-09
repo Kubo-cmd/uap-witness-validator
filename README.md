@@ -37,9 +37,11 @@ python3 -I -S -B verify_ledger.py /path/to/current --previous-root /path/to/prev
 
 The normal verifier checks held-file hashes, bounded and duplicate-key-safe JSON,
 contiguous sequence numbers, previous-record bindings, status consistency, and
-the absence of duplicate solver source. Transition mode additionally requires
-every historical record to remain byte-exact and `STATUS.md` to be an exact
-prefix extension. Any mismatch exits nonzero.
+absence of the manifest-enumerated known duplicate solver paths. This is a
+path-denylist check, not semantic detection of arbitrarily renamed solver code.
+Transition mode additionally requires every historical record to remain
+byte-exact and `STATUS.md` to be an exact prefix extension. Any mismatch exits
+nonzero.
 
 A standalone mutable manifest proves internal consistency, not authenticity
 against coordinated history rewriting. Strong continuity still requires a

@@ -215,7 +215,7 @@ def verify(root: Path) -> dict:
         raise VerificationError("invalid forbidden-source declaration")
     for relative in forbidden:
         if (root / relative).exists() or (root / relative).is_symlink():
-            raise VerificationError(f"duplicate solver source present: {relative}")
+            raise VerificationError(f"known duplicate solver path present: {relative}")
 
     document_entries = ledger["documents"]
     record_entries = ledger["records"]
@@ -307,7 +307,7 @@ def verify(root: Path) -> dict:
         "status": "UNDETERMINED",
         "documents": len(document_hashes),
         "records": len(record_hashes),
-        "solver_source_present": False,
+        "known_solver_paths_present": False,
     }
 
 

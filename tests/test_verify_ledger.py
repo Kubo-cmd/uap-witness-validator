@@ -52,7 +52,7 @@ class LedgerVerificationTests(unittest.TestCase):
         result = verify_ledger.verify(ROOT)
         self.assertTrue(result["ok"])
         self.assertEqual(result["status"], "UNDETERMINED")
-        self.assertFalse(result["solver_source_present"])
+        self.assertFalse(result["known_solver_paths_present"])
 
     def test_identity_transition_passes(self):
         result = verify_ledger.verify_transition(ROOT, ROOT)
@@ -165,7 +165,7 @@ class LedgerVerificationTests(unittest.TestCase):
             self.copy_ledger(root)
             (root / "src").mkdir(exist_ok=True)
             (root / "src/uap_conditioning.py").write_text("# duplicate\n")
-            with self.assertRaisesRegex(verify_ledger.VerificationError, "duplicate solver"):
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "known duplicate solver path"):
                 verify_ledger.verify(root)
 
     def test_boolean_size_fails(self):
