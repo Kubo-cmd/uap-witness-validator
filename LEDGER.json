@@ -1,0 +1,30 @@
+{
+  "schema": "uap-witness-ledger/v1",
+  "mode": "append-only",
+  "canonical_project": "uap-intake-validator",
+  "documents": [
+    {
+      "path": "STATUS.md",
+      "size": 1789,
+      "sha256": "437c26537d4c69ebf448252d5e7e6615c19072c8285ffbf7039873cbef12537d"
+    },
+    {
+      "path": "records/holdout-2026080502.council-status.json",
+      "size": 4476,
+      "sha256": "60d37e6781a6342657a4ddaf7e084c3c204a0bb260dc551ea9e2f888c350eba3"
+    }
+  ],
+  "records": [
+    {
+      "path": "records/0001-release-status-witness.json",
+      "size": 1024,
+      "sha256": "a9fb74bca1486041f1a79ac517a8fa12281e5ae06bab1ca1545eb3999abc115d"
+    }
+  ],
+  "forbidden_working_source_paths": [
+    "intake.py",
+    "src/uap_conditioning.py",
+    "uap_conditioning.py",
+    "validator.py"
+  ]
+}

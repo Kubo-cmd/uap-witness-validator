@@ -1,0 +1,81 @@
+{
+  "schema": "uap_crossing_angle_holdout_council_status/v1",
+  "experiment_id": "holdout-2026080502",
+  "recorded_utc": "2026-08-05T10:40:31Z",
+  "decision": "NOT_COUNCIL_CONFORMANT",
+  "council_inferential_status": "UNDETERMINED",
+  "append_only": true,
+  "frozen_protocol_interpretation": {
+    "authentic_execution_of_protocol_v1": true,
+    "criteria_1_to_3_passed": true,
+    "criterion_5_passed": false,
+    "physical_error_law_supported_under_protocol_v1": true,
+    "production_output_supported": false
+  },
+  "controlling_statement": "This holdout result is valid only under its own frozen preregistration. Under that protocol, criteria 1–3 passed and criterion 5 failed; the recorded result supports the protocol’s physical-error-law claim but not its production-output claim. Because the frozen design has known Council-method and evidence-control deviations, this result is NOT Council-conformant. No rerun or post-hoc replacement analysis is permitted.",
+  "council_status_statement": "The 6480-world holdout is an authentic execution of frozen protocol v1, but it is non-certifying under the later Council specification. Its Council-level inferential status is UNDETERMINED—not PASS and not retroactive FAIL. No recomputation, reinterpretation, or replacement analysis is authorized.",
+  "deviations": [
+    {
+      "id": "cr2-reference-df",
+      "frozen_v1_choice": "Student-t with df=clusters-rank=532",
+      "later_council_requirement": "contrast-specific Bell-McCaffrey/Satterthwaite degrees of freedom"
+    },
+    {
+      "id": "bootstrap-stratification",
+      "frozen_v1_choice": "noise-stratified whole-cell pairs bootstrap",
+      "later_council_requirement": "27 range×frame-count×orientation strata with 20 sampled cells per stratum"
+    },
+    {
+      "id": "bootstrap-slope-gate",
+      "frozen_v1_choice": "bootstrap slope interval reported but not a success gate",
+      "later_council_requirement": "bootstrap corroboration of both slope conditions"
+    },
+    {
+      "id": "attempt-uniqueness",
+      "frozen_v1_choice": "refuse overwrite when result artifacts already exist",
+      "later_council_requirement": "durable create-exclusive attempt sentinel before seed access or world generation",
+      "limit": "The completed record cannot retrospectively prove uniqueness of attempts before output creation."
+    },
+    {
+      "id": "source-closure",
+      "frozen_v1_choice": "sealed evidence/stronger_evidence.py and intake.py",
+      "later_council_requirement": "transitive local source, schemas, templates, tests, and exact dependency closure"
+    }
+  ],
+  "frozen_artifacts_sha256": {
+    "evidence/preregistration.json": "4464bd7db07a450f316fd4a6c553e1c6aadaf527460d7cf47f22191fe5976ba1",
+    "evidence/results/holdout-2026080502.json": "1fbf5035f50eb2d2acaeab2311dfafa484117b5d258bf75cf35ffc8c83234ba8",
+    "evidence/results/holdout-2026080502.rows.json": "a98dd17c6f1d6587b204d91b82b5b20f40ee03c25743ce780f3dc07d676720d2",
+    "evidence/results/holdout-2026080502.rows.csv": "30e9c4766b9324758b7fdc5abdc77c055b6127d7a245f9f6d7a378735485b1f9",
+    "evidence/results/holdout-2026080502.manifest.json": "745a2f2efefd58e28eaf87803d110c5b27142d3b2ccef36f94477c149a46b3e8"
+  },
+  "currently_observed_unsealed_dependency": {
+    "path": "uap_conditioning.py",
+    "sha256": "1fb99e967b231bdcc1250eab060c36f8af5168e4d9aef6390c28fbf6a9bb2d40",
+    "observed_utc": "2026-08-05T10:40:31Z",
+    "disclaimer": "This observation is not a retroactive run-time source seal and does not prove which bytes were used during the holdout."
+  },
+  "prohibited_actions": [
+    "rerun or continue the completed holdout",
+    "use a replacement seed or add holdout worlds",
+    "apply post-hoc Satterthwaite inference or a replacement bootstrap to the frozen rows",
+    "apply a retrospective decision rule",
+    "edit, replace, or reseal the frozen protocol, result, rows, or original manifest",
+    "describe the result as Council-conformant, Council-PASS, or retroactively Council-FAIL",
+    "claim a retroactive sentinel or dependency seal proves execution-time properties"
+  ],
+  "council_workstreams": [
+    {
+      "seat": "STATISTICIAN_ORACLE",
+      "vote": "CORRECTION_ARTIFACT_THEN_STOP"
+    },
+    {
+      "seat": "GUARDIAN_WITNESS",
+      "vote": "DENY_COUNCIL_CONFORMANCE_AND_CORRECT_CLAIMS"
+    },
+    {
+      "seat": "EXECUTOR_ENGINEER",
+      "vote": "CORRECTION_FIRST; FUTURE_TEMPLATE_ONLY_IF_INERT_AND_INDEPENDENT"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "schema": "uap-witness-record/v1",
+  "sequence": 1,
+  "previous_record_sha256": null,
+  "record_type": "release-status-witness",
+  "canonical_project": "uap-intake-validator",
+  "canonical_tag": "v0.1.0",
+  "canonical_source_commit": "687d263dba1b5409037256a1c7ccbcca225ca20f",
+  "release_archive_sha256": "819617449af7122350db0f88ffef3adf0b0c0cad65ceaa8a426c0e8ab347ff9e",
+  "council_inferential_status": "UNDETERMINED",
+  "documents": [
+    {
+      "path": "STATUS.md",
+      "sha256": "437c26537d4c69ebf448252d5e7e6615c19072c8285ffbf7039873cbef12537d"
+    },
+    {
+      "path": "records/holdout-2026080502.council-status.json",
+      "sha256": "60d37e6781a6342657a4ddaf7e084c3c204a0bb260dc551ea9e2f888c350eba3"
+    }
+  ],
+  "scope": "hash witness and status preservation only",
+  "non_claims": [
+    "does not prove scientific correctness",
+    "does not establish field or population validity",
+    "does not authorize a holdout rerun or reinterpretation",
+    "does not replace the canonical implementation"
+  ]
+}
