@@ -25,11 +25,25 @@ See `STATUS.md` for the human-readable append-only record and `records/` for mac
 Python 3.9+ and the standard library are sufficient:
 
 ```bash
-python3 verify_ledger.py
-python3 -m unittest discover -s tests -v
+python3 -I -S -B verify_ledger.py
+python3 -B -m unittest discover -s tests -v
 ```
 
-The verifier checks exact document and record hashes, duplicate JSON keys, contiguous sequence numbers, previous-record bindings, declared status consistency, and the absence of duplicate solver source in the public ledger tree. Any mismatch exits nonzero.
+To verify a proposed ledger against a previously trusted checkout:
+
+```bash
+python3 -I -S -B verify_ledger.py /path/to/current --previous-root /path/to/previous
+```
+
+The normal verifier checks held-file hashes, bounded and duplicate-key-safe JSON,
+contiguous sequence numbers, previous-record bindings, status consistency, and
+the absence of duplicate solver source. Transition mode additionally requires
+every historical record to remain byte-exact and `STATUS.md` to be an exact
+prefix extension. Any mismatch exits nonzero.
+
+A standalone mutable manifest proves internal consistency, not authenticity
+against coordinated history rewriting. Strong continuity still requires a
+trusted prior checkout, pinned commit, or external checkpoint.
 
 ## Repository roles
 
