@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import sys
+import unicodedata
 
 
 class VerificationError(RuntimeError):
@@ -21,6 +22,96 @@ HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 MAX_JSON_BYTES = 1024 * 1024
 MAX_STATUS_BYTES = 1024 * 1024
+CANONICAL_COUNCIL_STATUS_SEMANTIC_SHA256 = (
+    "7184171e70458d5cea6badd0e75a0d2e9a09fdfcb811e9b6677c07355d1560b5"
+)
+
+CANONICAL_CONTROLLING_STATEMENT = (
+    "This holdout result is valid only under its own frozen preregistration. Under that protocol, "
+    "criteria 1–3 passed and criterion 5 failed; the recorded result supports the protocol’s "
+    "physical-error-law claim but not its production-output claim. Because the frozen design has "
+    "known Council-method and evidence-control deviations, this result is NOT Council-conformant. "
+    "No rerun or post-hoc replacement analysis is permitted."
+)
+CANONICAL_COUNCIL_STATUS_STATEMENT = (
+    "The 6480-world holdout is an authentic execution of frozen protocol v1, but it is non-certifying "
+    "under the later Council specification. Its Council-level inferential status is UNDETERMINED—not "
+    "PASS and not retroactive FAIL. No recomputation, reinterpretation, or replacement analysis is "
+    "authorized."
+)
+CANONICAL_PROHIBITED_ACTIONS = (
+    "rerun or continue the completed holdout",
+    "use a replacement seed or add holdout worlds",
+    "apply post-hoc Satterthwaite inference or a replacement bootstrap to the frozen rows",
+    "apply a retrospective decision rule",
+    "edit, replace, or reseal the frozen protocol, result, rows, or original manifest",
+    "describe the result as Council-conformant, Council-PASS, or retroactively Council-FAIL",
+    "claim a retroactive sentinel or dependency seal proves execution-time properties",
+)
+CONTRADICTORY_STATUS_PATTERNS = (
+    re.compile(
+        r"\bcouncil"
+        r"(?:[-\s]+(?:status|result|outcome|verdict|decision))?"
+        r"\s*(?:is|was|remains|=|:)?\s*(?:\w+\s+){0,2}"
+        r"(?:a\s+)?(?:council[-\s]*)?pass(?:ed)?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bcouncil[-\s]+(?:pass|conformant)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bproduction[-_\s]+outputs?(?:[-_\s]+claim)?\s+"
+        r"(?:is|are|was|were|remains|remain|=|:)\s*(?:\w+\s+){0,2}"
+        r"(?:supported|valid|confirmed|proven|passes)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:supports?|validates?|confirms?|proves?)\s+(?:the\s+)?"
+        r"production[-_\s]+outputs?(?:[-_\s]+claim)?\b",
+        re.IGNORECASE,
+    ),
+)
+CLAIM_SAFEGUARD = re.compile(
+    r"\b(?:not|never|neither|without|if|unless|hypothetically|"
+    r"deny|denies|denied|forbid|forbids|forbidden|prohibit|prohibits|prohibited)\b"
+    r"[^,;:.!?—–]{0,48}$",
+    re.IGNORECASE,
+)
+CLAIM_SAFEGUARD_SUFFIX = re.compile(
+    r"^[^,;:.!?—–]{0,48}\b(?:hypothetical|hypothetically|counterfactual|"
+    r"counterfactually|forbidden|prohibited|denied|not\s+allowed)\b",
+    re.IGNORECASE,
+)
+CLAIM_WARNING_PREFIX = re.compile(
+    r"(?:\b(?:quoted|hypothetical)\s+warning|"
+    r"\b(?:the\s+)?(?:following\s+)?statement\s+is\s+(?:forbidden|prohibited))"
+    r"\s*:\s*[\"'“‘]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def contains_contradictory_status_claim(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = "".join(character for character in normalized if unicodedata.category(character) != "Cf")
+    normalized = normalized.replace("_", " ")
+    normalized = normalized.translate(str.maketrans("", "", "*`~[](){}"))
+    normalized = re.sub(r"\s+", " ", normalized)
+    for sentence in re.split(r"[.!?]+(?:\s+|$)", normalized):
+        for pattern in CONTRADICTORY_STATUS_PATTERNS:
+            for match in pattern.finditer(sentence):
+                prefix = sentence[max(0, match.start() - 64):match.start()]
+                suffix = sentence[match.end():match.end() + 64]
+                if (
+                    not CLAIM_SAFEGUARD.search(prefix)
+                    and not CLAIM_WARNING_PREFIX.search(prefix)
+                    and not CLAIM_SAFEGUARD_SUFFIX.search(suffix)
+                    and not re.search(
+                        r"\b(?:not|never|neither|without)\b", match.group(0), re.IGNORECASE
+                    )
+                ):
+                    return True
+    return False
 
 
 def _snapshot(value: os.stat_result) -> tuple:
@@ -175,6 +266,10 @@ def validate_council_status(value: dict) -> None:
     for key in ("experiment_id", "recorded_utc", "controlling_statement", "council_status_statement"):
         if not isinstance(value[key], str) or not value[key]:
             raise VerificationError(f"canonical status string is invalid: {key}")
+    if value["controlling_statement"] != CANONICAL_CONTROLLING_STATEMENT:
+        raise VerificationError("canonical controlling statement mismatch")
+    if value["council_status_statement"] != CANONICAL_COUNCIL_STATUS_STATEMENT:
+        raise VerificationError("canonical council status statement mismatch")
 
     protocol = value["frozen_protocol_interpretation"]
     protocol_keys = {
@@ -231,10 +326,12 @@ def validate_council_status(value: dict) -> None:
     prohibited = value["prohibited_actions"]
     if not isinstance(prohibited, list) or not prohibited:
         raise VerificationError("canonical prohibited actions are invalid")
-    if any(not isinstance(item, str) or not item for item in prohibited):
+    if any(not isinstance(item, str) or not item.strip() for item in prohibited):
         raise VerificationError("canonical prohibited action is invalid")
     if len(prohibited) != len(set(prohibited)):
         raise VerificationError("canonical prohibited actions are not unique")
+    if tuple(prohibited) != CANONICAL_PROHIBITED_ACTIONS:
+        raise VerificationError("canonical prohibited actions mismatch")
 
     workstreams = value["council_workstreams"]
     if not isinstance(workstreams, list) or not workstreams:
@@ -243,11 +340,22 @@ def validate_council_status(value: dict) -> None:
     for workstream in workstreams:
         if not isinstance(workstream, dict) or set(workstream) != {"seat", "vote"}:
             raise VerificationError("canonical council workstream keys are invalid")
-        if not isinstance(workstream["seat"], str) or not isinstance(workstream["vote"], str):
-            raise VerificationError("canonical council workstream value is invalid")
+        if not isinstance(workstream["seat"], str) or not workstream["seat"].strip():
+            raise VerificationError("canonical council seat is invalid")
+        if not isinstance(workstream["vote"], str) or not workstream["vote"].strip():
+            raise VerificationError("canonical council vote is invalid")
         if workstream["seat"] in seats:
             raise VerificationError("canonical council seats are not unique")
         seats.add(workstream["seat"])
+
+    semantic_bytes = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    if hashlib.sha256(semantic_bytes).hexdigest() != CANONICAL_COUNCIL_STATUS_SEMANTIC_SHA256:
+        raise VerificationError("canonical status document semantic digest mismatch")
 
 
 def verify_member(root: Path, entry: dict) -> tuple[Path, str, bytes]:
@@ -418,10 +526,18 @@ def verify_transition(previous_root: Path, current_root: Path) -> dict:
     old = load_json(require_regular(previous_root, "LEDGER.json"))
     new = load_json(require_regular(current_root, "LEDGER.json"))
 
+    old_forbidden = set(old["forbidden_working_source_paths"])
+    new_forbidden = set(new["forbidden_working_source_paths"])
+    if not old_forbidden.issubset(new_forbidden):
+        raise VerificationError("forbidden-source policy is not monotonic")
+
     old_status = read_held(require_regular(previous_root, "STATUS.md"), MAX_STATUS_BYTES)
     new_status = read_held(require_regular(current_root, "STATUS.md"), MAX_STATUS_BYTES)
     if not new_status.startswith(old_status):
         raise VerificationError("STATUS.md is not an exact append-only extension")
+    appended_status = new_status[len(old_status):].decode("utf-8")
+    if contains_contradictory_status_claim(appended_status):
+        raise VerificationError("contradictory status claim appended to STATUS.md")
 
     old_records = old["records"]
     new_records = new["records"]
