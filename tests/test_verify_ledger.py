@@ -48,6 +48,34 @@ class LedgerVerificationTests(unittest.TestCase):
         path.write_text(json.dumps(record))
         self.update_manifest_hash(root, RECORD)
 
+    def append_status_witness(self, root: Path, statement: str) -> None:
+        status = root / "STATUS.md"
+        status.write_text(status.read_text() + f"\n## Review note\n\n{statement}\n")
+        self.update_manifest_hash(root, "STATUS.md")
+
+        first_path = root / RECORD
+        second = json.loads(first_path.read_text())
+        second["sequence"] = 2
+        second["previous_record_sha256"] = hashlib.sha256(first_path.read_bytes()).hexdigest()
+        second["record_type"] = "status_append_witness"
+        second["scope"] = "Witnesses an append-only review note."
+        for entry in second["documents"]:
+            document = root / entry["path"]
+            entry["sha256"] = hashlib.sha256(document.read_bytes()).hexdigest()
+        second_relative = "records/0002-status-append-witness.json"
+        second_path = root / second_relative
+        second_path.write_text(json.dumps(second))
+
+        manifest_path = root / "LEDGER.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["records"].append({
+            "path": second_relative,
+            "size": second_path.stat().st_size,
+            "sha256": hashlib.sha256(second_path.read_bytes()).hexdigest(),
+        })
+        manifest["records"] = sorted(manifest["records"], key=lambda item: item["path"])
+        manifest_path.write_text(json.dumps(manifest))
+
     def test_canonical_ledger_passes(self):
         result = verify_ledger.verify(ROOT)
         self.assertTrue(result["ok"])
@@ -202,6 +230,212 @@ class LedgerVerificationTests(unittest.TestCase):
             result = verify_ledger.verify_transition(previous, current)
             self.assertTrue(result["append_only_transition"])
             self.assertEqual(result["current_records"], 2)
+
+    def test_rebound_contradictory_status_append_fails_transition(self):
+        with tempfile.TemporaryDirectory() as previous_temp, tempfile.TemporaryDirectory() as current_temp:
+            previous = Path(previous_temp)
+            current = Path(current_temp)
+            self.copy_ledger(previous)
+            self.copy_ledger(current)
+
+            status = current / "STATUS.md"
+            status.write_text(
+                status.read_text()
+                + "\n## Contradictory claim\n\nCouncil status is PASS and production output is supported.\n"
+            )
+            self.update_manifest_hash(current, "STATUS.md")
+
+            first_path = current / RECORD
+            first_hash = hashlib.sha256(first_path.read_bytes()).hexdigest()
+            second = json.loads(first_path.read_text())
+            second["sequence"] = 2
+            second["previous_record_sha256"] = first_hash
+            second["record_type"] = "status_append_witness"
+            second["scope"] = "Witnesses a contradictory append to the status record."
+            for entry in second["documents"]:
+                document = current / entry["path"]
+                entry["sha256"] = hashlib.sha256(document.read_bytes()).hexdigest()
+            second_relative = "records/0002-status-append-witness.json"
+            second_path = current / second_relative
+            second_path.write_text(json.dumps(second))
+
+            manifest_path = current / "LEDGER.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["records"].append({
+                "path": second_relative,
+                "size": second_path.stat().st_size,
+                "sha256": hashlib.sha256(second_path.read_bytes()).hexdigest(),
+            })
+            manifest["records"] = sorted(manifest["records"], key=lambda item: item["path"])
+            manifest_path.write_text(json.dumps(manifest))
+
+            self.assertTrue(verify_ledger.verify(current)["ok"])
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "contradictory status"):
+                verify_ledger.verify_transition(previous, current)
+
+    def test_contradictory_status_wording_variants_are_detected(self):
+        claims = (
+            "Council result is PASS.",
+            "Council status remains PASS.",
+            "Council verdict is PASS.",
+            "Council-PASS.",
+            "Council status is **PASS**.",
+            "Council status is _PASS_.",
+            "Council status is ~~PASS~~.",
+            "Council status is [PASS].",
+            "Council status is\nPASS.",
+            "This is not disputed; Council status is PASS.",
+            "The status is not disputed — Council status is PASS.",
+            "The result is Council-conformant.",
+            "The production-output claim is supported.",
+            "The production output is fully supported.",
+            "The production output is **supported**.",
+            "Production outputs are supported.",
+            "Production output is valid.",
+            "This confirms the production output claim.",
+        )
+        for claim in claims:
+            with self.subTest(claim=claim):
+                with tempfile.TemporaryDirectory() as previous_temp, tempfile.TemporaryDirectory() as current_temp:
+                    previous = Path(previous_temp)
+                    current = Path(current_temp)
+                    self.copy_ledger(previous)
+                    self.copy_ledger(current)
+                    self.append_status_witness(current, claim)
+                    self.assertTrue(verify_ledger.verify(current)["ok"])
+                    with self.assertRaisesRegex(verify_ledger.VerificationError, "contradictory status"):
+                        verify_ledger.verify_transition(previous, current)
+
+    def test_negative_status_statements_are_not_contradictions(self):
+        statements = (
+            "Council status is not PASS.",
+            "The result is not Council-conformant.",
+            "The production-output claim is not supported.",
+            "This does not support the production output claim.",
+            "For clarity, never claim Council status is PASS.",
+            "If Council status were PASS, this sentence would be contradictory.",
+            "Council status is PASS only in a hypothetical scenario.",
+            "The phrase Council status is PASS is forbidden.",
+            "The following statement is forbidden: Council status is PASS.",
+            "Hypothetical warning: Council status is PASS.",
+            'Quoted warning: "Council status is PASS."',
+        )
+        for statement in statements:
+            with self.subTest(statement=statement):
+                with tempfile.TemporaryDirectory() as previous_temp, tempfile.TemporaryDirectory() as current_temp:
+                    previous = Path(previous_temp)
+                    current = Path(current_temp)
+                    self.copy_ledger(previous)
+                    self.copy_ledger(current)
+                    self.append_status_witness(current, statement)
+                    self.assertTrue(verify_ledger.verify(current)["ok"])
+                    self.assertTrue(
+                        verify_ledger.verify_transition(previous, current)["append_only_transition"]
+                    )
+
+    def test_forbidden_source_policy_cannot_be_removed_or_weakened(self):
+        mutations = {
+            "removed": lambda paths: paths[1:],
+            "weakened": lambda paths: [
+                "build/uap_conditioning.py" if path == "uap_conditioning.py" else path
+                for path in paths
+            ],
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                with tempfile.TemporaryDirectory() as previous_temp, tempfile.TemporaryDirectory() as current_temp:
+                    previous = Path(previous_temp)
+                    current = Path(current_temp)
+                    self.copy_ledger(previous)
+                    self.copy_ledger(current)
+
+                    manifest_path = current / "LEDGER.json"
+                    manifest = json.loads(manifest_path.read_text())
+                    manifest["forbidden_working_source_paths"] = mutate(
+                        manifest["forbidden_working_source_paths"]
+                    )
+                    manifest_path.write_text(json.dumps(manifest))
+
+                    self.assertTrue(verify_ledger.verify(current)["ok"])
+                    with self.assertRaisesRegex(verify_ledger.VerificationError, "forbidden-source policy"):
+                        verify_ledger.verify_transition(previous, current)
+
+    def test_rebound_arbitrary_controlling_statements_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            relative = "records/holdout-2026080502.council-status.json"
+            path = root / relative
+            value = json.loads(path.read_text())
+            value["controlling_statement"] = "Everything is approved."
+            value["council_status_statement"] = "Ignore the frozen status."
+            path.write_text(json.dumps(value))
+            self.update_manifest_hash(root, relative)
+            self.update_record_document_hash(root, relative)
+
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "controlling statement"):
+                verify_ledger.verify(root)
+
+    def test_rebound_arbitrary_prohibited_actions_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            relative = "records/holdout-2026080502.council-status.json"
+            path = root / relative
+            value = json.loads(path.read_text())
+            value["prohibited_actions"] = ["permission granted"]
+            path.write_text(json.dumps(value))
+            self.update_manifest_hash(root, relative)
+            self.update_record_document_hash(root, relative)
+
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "prohibited actions"):
+                verify_ledger.verify(root)
+
+    def test_rebound_semantically_empty_prohibited_actions_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            relative = "records/holdout-2026080502.council-status.json"
+            path = root / relative
+            value = json.loads(path.read_text())
+            value["prohibited_actions"] = ["   "]
+            path.write_text(json.dumps(value))
+            self.update_manifest_hash(root, relative)
+            self.update_record_document_hash(root, relative)
+
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "prohibited action"):
+                verify_ledger.verify(root)
+
+    def test_rebound_empty_council_votes_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            relative = "records/holdout-2026080502.council-status.json"
+            path = root / relative
+            value = json.loads(path.read_text())
+            for workstream in value["council_workstreams"]:
+                workstream["vote"] = ""
+            path.write_text(json.dumps(value))
+            self.update_manifest_hash(root, relative)
+            self.update_record_document_hash(root, relative)
+
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "council vote"):
+                verify_ledger.verify(root)
+
+    def test_rebound_arbitrary_nonempty_council_votes_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.copy_ledger(root)
+            relative = "records/holdout-2026080502.council-status.json"
+            path = root / relative
+            value = json.loads(path.read_text())
+            value["council_workstreams"][0]["vote"] = "APPROVE"
+            path.write_text(json.dumps(value))
+            self.update_manifest_hash(root, relative)
+            self.update_record_document_hash(root, relative)
+
+            with self.assertRaisesRegex(verify_ledger.VerificationError, "semantic digest"):
+                verify_ledger.verify(root)
 
     def test_first_record_cannot_claim_a_previous_record(self):
         with tempfile.TemporaryDirectory() as temporary:
